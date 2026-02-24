@@ -1,0 +1,48 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment/config
+.env
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build/package outputs
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Project runtime outputs
+data/outputs/
+job-outputs/
+sweep_info.txt
+*.log
+*.out
+*.err
+
+__pycache__/*
