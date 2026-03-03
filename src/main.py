@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any, Sequence, cast
 
 from huggingface_hub import login as hf_login
-from pydantic_ai import Agent
 from tqdm.asyncio import tqdm as atqdm
 
 from data_sources import DatasetSpec, get_dataset, list_datasets
@@ -195,11 +194,6 @@ def main() -> None:
         )
 
     model, model_settings = build_model(settings)
-    test_agent: Agent[None, str] = Agent(
-        model,
-        model_settings=model_settings,
-    )
-    test_agent.run_sync("This is a test prompt to verify the model is working.")
 
     context = MethodContext(
         settings=settings,

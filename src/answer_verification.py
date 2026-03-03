@@ -723,7 +723,10 @@ def parse_numerical_range(text):
     if match_parentheses:
         range_text = match_parentheses.group(1)
         # Use a flexible pattern to find numbers (digits, commas, dots) potentially followed by %
-        float_strings = re.findall(r"[\d,.]+%?", range_text)
+        float_strings = re.findall(
+            r"[+-]?(?:\d[\d,]*\.?\d*|\.\d+)%?",
+            range_text,
+        )
 
         if len(float_strings) >= 2:
             try:
@@ -734,12 +737,28 @@ def parse_numerical_range(text):
                 # Fall through to the single-value extraction if conversion fails
                 pass
 
+    # --- 1b. Attempt direct range forms (e.g., 12-14, -5--3) ---
+    direct_range_match = re.match(
+        r"^\s*([+-]?(?:\d[\d,]*\.?\d*|\.\d+))\s*-\s*([+-]?(?:\d[\d,]*\.?\d*|\.\d+))\s*$",
+        text,
+    )
+    if direct_range_match:
+        try:
+            lower_bound = clean_and_convert(direct_range_match.group(1))
+            upper_bound = clean_and_convert(direct_range_match.group(2))
+            return [lower_bound, upper_bound], None
+        except ValueError:
+            pass
+
     # --- 2. If no valid range is found, extract the main value (New Logic) ---
 
     # *** REVISED REGEX HERE ***
     # Pattern now allows for optional currency symbols ($€£) at the beginning of the string
     # before the number sequence ([\d,.\s]+).
-    main_value_match = re.search(r"^[\s]*([$€£]?[\s]*[\d,.\s]+%?[\s]*\w*)", text)
+    main_value_match = re.search(
+        r"^[\s]*([$€£]?[\s]*[+-]?[\d,.\s]+%?[\s]*\w*)",
+        text,
+    )
 
     if main_value_match:
         # Extract the matched group (e.g., "€120,000" or "12.27")
@@ -747,7 +766,10 @@ def parse_numerical_range(text):
 
         # We search for the *actual* number part within this match, excluding trailing units
         # that might have been picked up by the \w*
-        number_only_match = re.search(r"[$€£]?[\s]*[\d,.]+%?", main_value_string)
+        number_only_match = re.search(
+            r"[$€£]?[\s]*[+-]?[\d,.]+%?",
+            main_value_string,
+        )
 
         if number_only_match:
             try:
@@ -837,6 +859,21 @@ def normalize_answer(answer: str | None, question_type: QuestionType) -> str | N
         return normalized if normalized else None
 
 
+_SIGNED_NUMBER_TOKEN = r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?"
+_SIGNED_RANGE_RE = re.compile(
+    rf"^\s*({_SIGNED_NUMBER_TOKEN})\s*(?:-\s*({_SIGNED_NUMBER_TOKEN}))?\s*$"
+)
+
+
+def _parse_numeric_range(value: str) -> tuple[float, float] | None:
+    match = _SIGNED_RANGE_RE.fullmatch(value.strip())
+    if not match:
+        return None
+    low = float(match.group(1))
+    high = float(match.group(2)) if match.group(2) is not None else low
+    return low, high
+
+
 def compare(range_a: str | None, range_b: str | None) -> bool:
     """
     Compares two numeric ranges represented by list[float] parameters.
@@ -856,21 +893,20 @@ def compare(range_a: str | None, range_b: str | None) -> bool:
         return False
 
     try:
-        # 1. Determine the min and max for range_a (convert to float for numeric comparison)
-        a_parts = range_a.split("-")
-        a_min = float(a_parts[0])
-        a_max = float(a_parts[1]) if len(a_parts) > 1 else a_min
+        parsed_a = _parse_numeric_range(range_a)
+        parsed_b = _parse_numeric_range(range_b)
+        if parsed_a is None or parsed_b is None:
+            return False
+        a_min, a_max = parsed_a
+        b_min, b_max = parsed_b
 
-        # 2. Determine the min and max for range_b (convert to float for numeric comparison)
-        b_parts = range_b.split("-")
-        b_min = float(b_parts[0])
-        b_max = float(b_parts[1]) if len(b_parts) > 1 else b_min
+        a_low, a_high = (a_min, a_max) if a_min <= a_max else (a_max, a_min)
+        b_low, b_high = (b_min, b_max) if b_min <= b_max else (b_max, b_min)
 
-        # 3. Check for containment (using numeric comparison)
-        # For range_b to be contained within range_a, two conditions must be met:
-        # a) The start of range_b must be greater than or equal to the start of range_a.
-        # b) The end of range_b must be less than or equal to the end of range_a.
-        is_contained = (a_min <= b_min) and (b_max <= a_max)
+        # For range_b to be contained within range_a:
+        # a) start(range_b) >= start(range_a)
+        # b) end(range_b) <= end(range_a)
+        is_contained = (a_low <= b_low) and (b_high <= a_high)
 
         return is_contained
     except (ValueError, IndexError):
@@ -1100,11 +1136,11 @@ def parse_verifier_verdict(response: str) -> tuple[str, str | None]:
     if lines:
         last_line = lines[-1].strip()
         last_line_upper = last_line.upper()
-        # Only match if CORRECT/INCORRECT is the primary content (not just mentioned)
-        # Must be either the whole line or clearly marked as the verdict
-        if last_line_upper == "INCORRECT" or last_line_upper.endswith(" INCORRECT"):
+        if re.search(r"\bINCORRECT\b", last_line_upper):
             return response.strip(), "INCORRECT"
-        if last_line_upper == "CORRECT" or last_line_upper.endswith(" CORRECT"):
+        if re.search(r"\bNOT\s+CORRECT\b", last_line_upper):
+            return response.strip(), "INCORRECT"
+        if re.search(r"\bCORRECT\b", last_line_upper):
             return response.strip(), "CORRECT"
         # Check for numeric verdict at end of line
         token_match = re.search(r"(?:^|\s|\()([+-]?1)\s*$", last_line)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import defaultdict
 from typing import cast
 
@@ -8,7 +9,7 @@ from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
 from tqdm.asyncio import tqdm as atqdm
 
-from answer_verification import compute_prm_score, normalize_answer
+from answer_verification import compute_prm_score, normalize_answer, parse_verifier_verdict
 from prompts import PRISM_MATH, PRISM_MCQ, PRISM_TEXT
 
 from ..stages import Answer, PopulationToAnswer, StageContext
@@ -69,6 +70,12 @@ class PrmScoreVote(PopulationToAnswer):
                 "<answer> line."
             )
 
+            fallback = (
+                "<step>No steps provided -1</step>\n"
+                "<step>FINAL ANSWER CHECK -1</step>\n"
+                "<answer>-1</answer>"
+            )
+
             try:
                 result = await asyncio.wait_for(
                     verifier_agent.run(prompt),
@@ -78,6 +85,20 @@ class PrmScoreVote(PopulationToAnswer):
                 feedback = result.output or ""
             except Exception:
                 return idx, normalized, answer.choice, 0.0
+
+            # Guard against malformed verifier output (matches PRISM logic)
+            if not feedback:
+                feedback = fallback
+            else:
+                step_count = len(
+                    re.findall(
+                        r"<step[^>]*>(.*?)</step>", feedback, re.DOTALL | re.IGNORECASE
+                    )
+                )
+                _, verdict = parse_verifier_verdict(feedback)
+                has_final_check = "FINAL ANSWER CHECK" in feedback.upper()
+                if step_count < 2 or verdict is None or not has_final_check:
+                    feedback = fallback
 
             score = compute_prm_score(feedback)
             return idx, normalized, answer.choice, score

@@ -57,6 +57,13 @@ def format_question_block(question: str, choices: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def _strip_choice_prefix(choice: str) -> str:
+    """Normalize choices like 'a) text' -> 'text' for consistent indexing."""
+    if len(choice) > 2 and choice[1] == ")" and choice[0].lower() in "abcd":
+        return choice.split(")", 1)[1].strip()
+    return choice
+
+
 def build_multiple_choice_examples(
     ds: DatasetDict,
     max_samples: int,
@@ -75,21 +82,17 @@ def build_multiple_choice_examples(
     for idx, (q, corr, a1, a2, a3) in enumerate(
         zip(questions, correct_answers, answers_1, answers_2, answers_3)
     ):
-        choices = [corr, a1, a2, a3]
-        choices = [
-            (
-                c.split(")", 1)[1].strip()
-                if len(c) > 2 and c[1] == ")" and c[0].lower() in "abcd"
-                else c
-            )
-            for c in choices
-        ]
+        # Normalize all options before shuffling so correct-answer lookup is stable.
+        normalized_choices = [_strip_choice_prefix(c) for c in [corr, a1, a2, a3]]
+        normalized_correct = normalized_choices[0]
+        choices = list(normalized_choices)
         rng.shuffle(choices)
-        correct_label = "abcd"[choices.index(corr)]
+        correct_label = "abcd"[choices.index(normalized_correct)]
         block = format_question_block(q, choices)
         metadata = {
             "choice_order": {lbl: text for lbl, text in zip("abcd", choices)},
             "original_correct_answer": corr,
+            "normalized_correct_answer": normalized_correct,
         }
         items.append(
             EvaluationExample(

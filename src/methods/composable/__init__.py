@@ -15,7 +15,6 @@ from shared import (
     EvaluationExample,
     EvaluationResponse,
     MethodResult,
-    TokenUsage,
     sanitized_settings_dump,
 )
 
@@ -632,21 +631,15 @@ def create_composable_runner(
         cached_result = _load_cached_populations(depth_csv_path, population_signature)
 
         cache_mode = "none"
+        cached_usage: tuple[int, int, int, int] | None = None
+        seed_result: tuple[list[Answer], tuple[int, int, int, int] | None] | None = None
+        seed_usage: tuple[int, int, int, int] | None = None
 
         if cached_result is not None:
             cached_populations, cached_usage = cached_result
             all_populations = cached_populations
             population = cached_populations[-1] if cached_populations else []
             cache_mode = "full"
-            if cached_usage is not None:
-                stage_context.token_usage.add(
-                    TokenUsage(
-                        total_input_tokens=cached_usage[0],
-                        total_output_tokens=cached_usage[1],
-                        secondary_input_tokens=cached_usage[2],
-                        secondary_output_tokens=cached_usage[3],
-                    )
-                )
         else:
             seed_result = _load_seed_population(depth_csv_path, seed_signature)
 
@@ -655,15 +648,6 @@ def create_composable_runner(
                 population = seed_population
                 all_populations = [population]
                 cache_mode = "seed"
-                if seed_usage is not None:
-                    stage_context.token_usage.add(
-                        TokenUsage(
-                            total_input_tokens=seed_usage[0],
-                            total_output_tokens=seed_usage[1],
-                            secondary_input_tokens=seed_usage[2],
-                            secondary_output_tokens=seed_usage[3],
-                        )
-                    )
 
                 if config.pop_to_pop is not None:
                     for _ in range(depth_iterations):
@@ -815,6 +799,22 @@ def create_composable_runner(
             )
         ]
 
+        cached_usage_reference = None
+        if cache_mode == "full" and cached_usage is not None:
+            cached_usage_reference = {
+                "total_input_tokens": cached_usage[0],
+                "total_output_tokens": cached_usage[1],
+                "secondary_input_tokens": cached_usage[2],
+                "secondary_output_tokens": cached_usage[3],
+            }
+        elif cache_mode == "seed" and seed_usage is not None:
+            cached_usage_reference = {
+                "total_input_tokens": seed_usage[0],
+                "total_output_tokens": seed_usage[1],
+                "secondary_input_tokens": seed_usage[2],
+                "secondary_output_tokens": seed_usage[3],
+            }
+
         return MethodResult(
             responses=responses,
             depth_events=depth_events,
@@ -822,6 +822,7 @@ def create_composable_runner(
                 "depth_responses": depth_responses,
                 "population_cache_used": cache_used,
                 "population_cache_mode": cache_mode,
+                "cached_usage_reference": cached_usage_reference,
                 "token_usage": {
                     "total_input_tokens": usage_snapshot.total_input_tokens,
                     "total_output_tokens": usage_snapshot.total_output_tokens,
