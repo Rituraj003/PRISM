@@ -299,4 +299,4 @@ tests/                         test suite
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](/home/rituraj/PRISM/LICENSE).
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
